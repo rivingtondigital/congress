@@ -579,20 +579,6 @@ def make_node(parent, tag, text, **attrs):
         n.set(k.replace("___", ""), v)
     return n
 
-# Correct mistakes on THOMAS
-
-
-def thomas_corrections(thomas_id):
-
-    # C.A. Dutch Ruppersberger
-    if thomas_id == "02188":
-        thomas_id = "01728"
-
-    # Pat Toomey
-    if thomas_id == "01594":
-        thomas_id = "02085"
-
-    return thomas_id
 
 # Return a subset of a mapping type
 
@@ -763,7 +749,7 @@ def lookup_legislator(congress, role_type, name, state, party, when, id_requeste
         when = when.date()
     when = when.isoformat()
     name_parts = to_ascii(name).split(", ", 1)
-    matches = []
+    matches = { }
     for moc, term in lookup_legislator_cache[congress]:
         # Make sure the date is surrounded by the term start/end dates.
         if term['start'] > when:
@@ -816,17 +802,18 @@ def lookup_legislator(congress, role_type, name, state, party, when, id_requeste
             # no match
             continue
 
-        # This is a possible match.
-        matches.append((moc, term))
+        # This is a possible match. Remember which term matched, but because of term overlaps
+        # on Jan 3's, don't key on the term uniquely, only on the moc.
+        matches[moc['id'][id_requested]] = term
 
     # Return if there is a unique match.
     if len(matches) == 0:
         logging.warn("Could not match name %s (%s-%s; %s) to any legislator." % (name, state, party, when))
         return None
     if len(matches) > 1:
-        logging.warn("Multiple matches of name %s (%s-%s; %s) to legislators (excludes %s)." % (name, state, party, when, str(exclude)))
+        logging.warn("Multiple matches of name %s (%s-%s; %s) to legislators (%s; excludes %s)." % (name, state, party, when, str(matches), str(exclude)))
         return None
-    return matches[0][0]['id'][id_requested]
+    return list(matches)[0]
 
 
 

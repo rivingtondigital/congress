@@ -89,7 +89,7 @@ def get_bills_to_process(options):
                     # file need to be updated?
                     bulkfile_lastmod = utils.read(fn.replace(".xml", "-lastmod.txt"))
                     parse_lastmod = utils.read(get_data_path(congress, bill_type, bill_type_and_number, "data-fromfdsys-lastmod.txt"))
-                    if bulkfile_lastmod != parse_lastmod:
+                    if bulkfile_lastmod != parse_lastmod or options.get("force"):
                         bill_id = bill_type_and_number + "-" + congress
                         yield bill_id
 
@@ -129,7 +129,7 @@ def _path_to_billstatus_file(bill_id):
 
 def read_fdsys_bulk_bill_status_file(fn, bill_id):
     fdsys_billstatus = utils.read(fn)
-    return xmltodict.parse(fdsys_billstatus, force_list=('item', 'amendment',))
+    return xmltodict.parse(fdsys_billstatus, force_list=('item', 'amendment', 'committeeReport',))
 
 def form_bill_json_dict(xml_as_dict):
     """
@@ -186,6 +186,7 @@ def form_bill_json_dict(xml_as_dict):
         'related_bills': bill_info.related_bills_for(bill_dict['relatedBills']),
         'committees': bill_info.committees_for(bill_dict['committees']['billCommittees']),
         'amendments': bill_info.amendments_for(bill_dict['amendments']),
+        'committee_reports': bill_info.committee_reports_for(bill_dict['committeeReports']),
 
         'updated_at': bill_dict.get('updateDate', ''),
     }

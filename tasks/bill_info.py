@@ -17,14 +17,14 @@ def create_govtrack_xml(bill, options):
 
     def make_node(parent, tag, text, **attrs):
         if options.get("govtrack", False):
-            # Rewrite thomas_id attributes as just id with GovTrack person IDs.
+            # Rewrite bioguide_id attributes as just id with GovTrack person IDs.
             attrs2 = {}
             for k, v in attrs.items():
                 if v:
-                    if k == "thomas_id":
-                        # remap "thomas_id" attributes to govtrack "id"
+                    if k == "bioguide_id":
+                        # remap "bioguide_id" attributes to govtrack "id"
                         k = "id"
-                        v = str(utils.translate_legislator_id('thomas', v, 'govtrack'))
+                        v = str(utils.translate_legislator_id('bioguide', v, 'govtrack'))
                     attrs2[k] = v
             attrs = attrs2
 
@@ -59,13 +59,13 @@ def create_govtrack_xml(bill, options):
 
     if bill['sponsor']:
         # TODO: Sponsored by committee?
-        make_node(root, "sponsor", None, thomas_id=bill['sponsor']['thomas_id'])
+        make_node(root, "sponsor", None, bioguide_id=bill['sponsor']['bioguide_id'])
     else:
         make_node(root, "sponsor", None)
 
     cosponsors = make_node(root, "cosponsors", None)
     for cosp in bill['cosponsors']:
-        n = make_node(cosponsors, "cosponsor", None, thomas_id=cosp["thomas_id"])
+        n = make_node(cosponsors, "cosponsor", None, bioguide_id=cosp["bioguide_id"])
         if cosp["sponsored_at"]:
             n.set("joined", cosp["sponsored_at"])
         if cosp["withdrawn_at"]:
@@ -139,6 +139,10 @@ def create_govtrack_xml(bill, options):
     if bill.get('summary'):
         make_node(root, "summary", bill['summary']['text'], date=bill['summary']['date'], status=bill['summary']['as'])
 
+    committee_reports = make_node(root, "committee-reports", None)
+    for report in bill['committee_reports']:
+        make_node(committee_reports, "report", report)
+
     return etree.tostring(root, pretty_print=True)
 
 
@@ -166,7 +170,6 @@ def sponsor_for(sponsor_dict):
         'district': district,
         'state': m.group('state'),
         #'party': m.group('party'),
-        'thomas_id': utils.translate_legislator_id('bioguide', sponsor_dict['bioguideId'], 'thomas'),  # TODO: Remove one day.
         'bioguide_id': sponsor_dict['bioguideId'],
         'type': 'person'
     }
@@ -792,8 +795,8 @@ def parse_bill_action(action_dict, prev_status, bill_id, title):
         action["suspension"] = suspension
 
         # correct upstream data error
-        if bill_id == "s2012-114" and "Roll no. 250" in line:
-            as_amended = True
+        if bill_id == "s2012-114" and "Roll no. 250" in line: as_amended = True
+        if bill_id == "s2943-114" and "On passage Passed without objection" in line: as_amended = True
 
         # get the new status of the bill after this vote
         new_status = new_status_after_vote(vote_type, pass_fail == "pass", "h", bill_type, suspension, as_amended, title, prev_status)
@@ -1000,6 +1003,10 @@ def parse_bill_action(action_dict, prev_status, bill_id, title):
             action["type"] = "vetoed"
             status = "PROV_KILL:VETO"
 
+    m = re.search("Sent to Archivist of the United States unsigned", line, re.I)
+    if m != None:
+        status = "ENACTED:TENDAYRULE"
+
     m = re.search("^(?:Became )?(Public|Private) Law(?: No:)? ([\d\-]+)\.", line, re.I)
     if m != None:
         action["law"] = m.group(1).lower()
@@ -1007,7 +1014,7 @@ def parse_bill_action(action_dict, prev_status, bill_id, title):
         action["congress"] = pieces[0]
         action["number"] = pieces[1]
         action["type"] = "enacted"
-        if prev_status in ("ENACTED:SIGNED", "ENACTED:VETO_OVERRIDE"):
+        if prev_status in ("ENACTED:SIGNED", "ENACTED:VETO_OVERRIDE", "ENACTED:TENDAYRULE"):
             pass  # this is a final administrative step
         elif prev_status == "PROV_KILL:VETO" or prev_status.startswith("VETOED:"):
             # somehow missed the override steps
@@ -1136,3 +1143,8 @@ def amendments_for(amendment_list):
         }
     return [build_dict(amendment) for amendment in amendment_list]
 
+def committee_reports_for(committeeReports):
+    ret = []
+    for report in (committeeReports or {}).get("committeeReport", []):
+        ret.append( report["citation"] )
+    return ret

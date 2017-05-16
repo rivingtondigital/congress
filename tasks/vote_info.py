@@ -193,6 +193,29 @@ def parse_senate_vote(dom, vote):
     vote["result_text"] = unicode(dom.xpath("string(vote_result_text)"))
     vote["result"] = unicode(dom.xpath("string(vote_result)"))
 
+    # Senate cloture votes have consistently bad vote_question_text values: They don't say what the cloture
+    # was about specifically, just what bill was relevant. So cloture on an amendment just appears as
+    # cloture on the bill. The vote_title text is correctly specific in those cases. So swap the two fields
+    # in those cases so that our 'question' field is reliably a good title, and subject provides additional
+    # information. Check that the subject is non-empty before using it, just in case. Example:
+    #  "question": "On the Cloture Motion H.R. 2578"
+    #  "subject": "Motion to Invoke Cloture on the Motion to Commit H.R. 2578 with instructions (Amdt. No. 4750)"
+    # https://www.senate.gov/legislative/LIS/roll_call_votes/vote1142/vote_114_2_00104.xml
+    if "Cloture" in vote["question"] and vote["subject"]:
+        x = vote["question"]
+        vote["question"] = vote["subject"]
+        vote["subject"] = x
+
+    # "Motion to Proceed to Legislative Session" is also consistently buried and weirdly attached to a nomination.
+    # Swap the fields in that case too and unlink it from the nomination because it's confusing.
+    # (Should we do the swap for all motions to proceed?)
+    # https://www.senate.gov/legislative/LIS/roll_call_votes/vote1151/vote_115_1_00049.xml
+    elif "Legislative Session" in vote["subject"]:
+        x = vote["question"]
+        vote["question"] = vote["subject"]
+        vote["subject"] = x
+        for n in dom.xpath("document/document_type"): n.text = None
+
     bill_types = {"S.": "s", "S.Con.Res.": "sconres", "S.J.Res.": "sjres", "S.Res.": "sres", "H.R.": "hr", "H.Con.Res.": "hconres", "H.J.Res.": "hjres", "H.Res.": "hres"}
 
     if unicode(dom.xpath("string(document/document_type)")):
@@ -483,7 +506,7 @@ def get_vote_category(vote_question):
         # common
         (r"^On Overriding the Veto", "veto-override"),
         (r"^On Presidential Veto", "veto-override"),
-        (r"Objections of the President Not ?Withstanding", "veto-override"),  # order matters so must go before bill passage
+        (r"Objections of the President (To The Contrary )?Not ?Withstanding", "veto-override"),  # order matters so must go before bill passage
         (r"^On Passage", "passage"),
         (r"^On the Resolution of Ratification.*", "treaty"), # order matters so must go before other resolutions
         (r"^On (Agreeing to )?the (Joint |Concurrent )?Resolution", "passage"),
@@ -498,7 +521,7 @@ def get_vote_category(vote_question):
         (r"^On the Motion \(Motion to Concur", "passage"),
 
         # house only
-        (r"^(On Motion (to|that the House) )?(Concur in|Concurring|Concurring in|On Concurring|Agree to|On Agreeing to) (the )?Senate (Amendment|amdt|Adt)s?", "passage"),
+        (r"^(On Motion (to|that the House) )?(Concur in|Concurring|Concurring in|On Concurring|On Concurring in|Agree to|On Agreeing to) (the )?Senate (Amendment|amdt|Adt)s?", "passage"),
         (r"^(On Motion to )?Suspend (the )?Rules and (Agree|Concur|Pass)", "passage-suspension"),
         (r"^Call of the House$", "quorum"),
         (r"^Call by States$", "quorum"),
@@ -515,6 +538,7 @@ def get_vote_category(vote_question):
         (r"^On .*Motion ", "procedural"),  # $1 is a name like "Broun of Georgia"
         (r"^On the Decision of the Chair", "procedural"),
         (r"^Whether the Amendment is Germane", "procedural"),
+        (r"^Table Appeal of the Ruling of the Chair", "procedural"),
     )
 
     for regex, category in mapping:

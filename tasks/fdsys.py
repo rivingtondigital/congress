@@ -207,7 +207,9 @@ def update_sitemap(url, current_lastmod, how_we_got_here, options, listing):
                     raise Exception("Unmatched package URL (%s) at %s." % (url, "->".join(how_we_got_here)))
                 package_name = m.group(1)
                 if options.get("filter") and not re.search(options["filter"], package_name): continue
-                results = mirror_package(subject, package_name, lastmod, url, options)
+                mirror_results = mirror_package(subject, package_name, lastmod, url, options)
+                if mirror_results is not None and len(mirror_results) > 0:
+                    results = results + mirror_results
 
             else:
                 # This is a bulk data item. Extract components of the URL.
@@ -216,7 +218,9 @@ def update_sitemap(url, current_lastmod, how_we_got_here, options, listing):
                     raise Exception("Unmatched bulk data file URL (%s) at %s." % (url, "->".join(how_we_got_here)))
                 item_path = m.group(1)
                 if options.get("filter") and not re.search(options["filter"], item_path): continue
-                results = mirror_bulkdata_file(subject, url, item_path, lastmod, options)
+                mirror_results = mirror_bulkdata_file(subject, url, item_path, lastmod, options)
+                if mirror_results is not None and len(mirror_results) > 0:
+                    results = results + mirror_results
 
     else:
         raise Exception("Unknown sitemap type (%s) at the root sitemap of %s." % (sitemap.tag, url))
@@ -455,6 +459,12 @@ def mirror_package_or_granule(sitemap, package_name, granule_name, lastmod, opti
             elif sitemap["collection"] == "BILLS" and file_type in ("text", "mods"):
                 # expected to be present for bills
                 raise Exception("Failed to download %s %s (404)" % (package_name, file_type))
+        elif data is True:
+            # Download was successful but needs_content was False so we don't have the
+            # file content. Instead, True is returned. Strangely isintance(True, int) is
+            # True (!!!) so we have to test for True separately from testing if we got a
+            # return code integer.
+            pass
         elif not data or isinstance(data, int):
             # There was some other error - skip the rest. Don't
             # update file_lastmod!
@@ -510,13 +520,23 @@ def get_output_path(sitemap, package_name, granule_name, options):
 
     # The path will depend a bit on the collection.
     if sitemap["collection"] == "BILLS":
-        # Store with the other bill data.
+        # Store with the other bill data ([congress]/bills/[billtype]/[billtype][billnumber]).
         bill_and_ver = get_bill_id_for_package(package_name, with_version=False, restrict_to_congress=options.get("congress"))
         if not bill_and_ver:
             return None  # congress number does not match options["congress"]
         from bills import output_for_bill
         bill_id, version_code = bill_and_ver
         return output_for_bill(bill_id, "text-versions/" + version_code, is_data_dot=False)
+
+    elif sitemap["collection"] == "CRPT":
+        # Store committee reports in [congress]/crpt/[reporttype].
+        m = re.match(r"CRPT-(\d+)([hse]rpt)(\d+)$", package_name)
+        if not m:
+            raise ValueError(package_name)
+        congress, report_type, report_number = m.groups()
+        if options.get("congress") and congress != options.get("congress"):
+            return None  # congress number does not match options["congress"]
+        return "%s/%s/%s/%s/%s" % (utils.data_dir(), congress, sitemap["collection"].lower(), report_type, report_type + report_number)
     
     else:
         # Store in fdsys/COLLECTION/YEAR/PKGNAME[/GRANULE_NAME].

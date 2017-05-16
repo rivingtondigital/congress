@@ -34,18 +34,25 @@ def run(options):
     # accepts yyyymmdd format
     given_week = options.get('week_of', None)
     if given_week is None:
-        for_the_week = get_latest_monday(options)
+        for_the_weeks = get_mondays_to_scan(options)
     else:
-        for_the_week = get_monday_of_week(given_week)
+        for_the_weeks = [get_monday_of_week(given_week)]
 
-    logging.warn('Scraping upcoming bills from docs.house.gov/floor for the week of %s.\n' % for_the_week)
+    for for_the_week in for_the_weeks:
+        run_for_week(for_the_week, options)
+
+def run_for_week(for_the_week, options):
+    logging.info('Scraping upcoming bills from docs.house.gov/floor for the week of %s...' % for_the_week)
     house_floor = fetch_floor_week(for_the_week, options)
+    if house_floor is None:
+        logging.warn("Nothing posted for the week of %s" % for_the_week)
+        return
 
     output_file = "%s/upcoming_house_floor/%s.json" % (utils.data_dir(), for_the_week)
     output = json.dumps(house_floor, sort_keys=True, indent=2, default=utils.format_datetime)
     utils.write(output, output_file)
 
-    logging.warn("\nFound %i bills for the week of %s, written to %s" % (len(house_floor['upcoming']), for_the_week, output_file))
+    logging.warn("Found %i bills for the week of %s, written to %s" % (len(house_floor['upcoming']), for_the_week, output_file))
 
 
 # For any week, e.g. http://docs.house.gov/floor/Download.aspx?file=/billsthisweek/20131021/20131021.xml
@@ -54,6 +61,7 @@ def fetch_floor_week(for_the_week, options):
     week_url = base_url + '%s/%s.xml' % (for_the_week, for_the_week)
 
     body = utils.download(week_url, 'upcoming_house_floor/%s.xml' % for_the_week, options)
+    if "was not found" in body: return None
     dom = lxml.etree.fromstring(body)
 
     # can download the actual attached files to disk, if asked
@@ -172,19 +180,32 @@ def get_monday_of_week(day_to_get_bills):
 
 
 def get_latest_monday(options):
+    # docs.house.gov always links to the most recent week that isn't in the future.
     url = "http://docs.house.gov/floor/"
     html = utils.download(url, None, options)
     doc = BeautifulSoup(html)
 
     links = doc.select("a.downloadXML")
     if len(links) != 1:
-        utils.admin("Error finding download link for this week!")
+        utils.admin("There is no docs.house.gov download link --- maybe there are no upcoming bills.")
         return None
 
     link = links[0]
     week = os.path.split(link['href'])[-1].split(".")[0]
+    week = datetime.strptime(week, "%Y%m%d").date()
 
     return week
+
+def get_mondays_to_scan(options):
+    # Get the week currently linked on docs.house.gov. If there isn't any (e.g. we are between
+    # sessions), just return an empty list of weeks to scan.
+    most_recent = get_latest_monday(options)
+    if most_recent is None:
+        return []
+
+    # Look two weeks into the future too, since when we get to the end of the week the next
+    # week's list is sometimes available, and sometimes a week beyond that.
+    return [(most_recent + relativedelta(days=7*i)).strftime("%Y%m%d") for i in [0, 1, 2]]
 
 
 def bill_id_for(bill_number, congress):
